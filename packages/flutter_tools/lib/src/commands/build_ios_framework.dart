@@ -327,12 +327,8 @@ class BuildIOSFrameworkCommand extends BuildFrameworkCommand {
           .path);
       globals.printStatus(
           '\nCopy the ${globals.fs.path.basenameWithoutExtension(pluginRegistrantHeader.path)} class into your project.\n'
-          'See https://flutter.dev/docs/development/add-to-app/ios/add-flutter-screen#create-a-flutterengine for more information.');
+          'See https://flutter.dev/to/ios-create-flutter-engine for more information.');
     }
-
-    globals.printWarning(
-        'Bitcode support has been deprecated. Turn off the "Enable Bitcode" build setting in your Xcode project or you may encounter compilation errors.\n'
-        'See https://developer.apple.com/documentation/xcode-release-notes/xcode-14-release-notes for details.');
 
     return FlutterCommandResult.success();
   }
@@ -379,7 +375,7 @@ LICENSE
   }
   s.author                = { 'Flutter Dev Team' => 'flutter-dev@googlegroups.com' }
   s.source                = { :http => '${cache.storageBaseUrl}/flutter_infra_release/flutter/${cache.engineRevision}/$artifactsMode/artifacts.zip' }
-  s.documentation_url     = 'https://flutter.dev/docs'
+  s.documentation_url     = 'https://docs.flutter.dev'
   s.platform              = :ios, '12.0'
   s.vendored_frameworks   = 'Flutter.xcframework'
 end
