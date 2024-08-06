@@ -26,7 +26,7 @@ class MainWidget extends StatefulWidget {
 }
 
 class MainWidgetState extends State<MainWidget> {
-  double currentSliderValue = 20;
+  int _count = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -39,13 +39,32 @@ class MainWidgetState extends State<MainWidget> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            TextButton(
-              onPressed: () {  },
-              child: const Text('Text button'),
+            MergeSemantics(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  const Text('This is a TextButton:'),
+                  TextButton(
+                    onPressed: () {
+                      setState(() { _count++; });
+                    },
+                    child: const Text('Action'),
+                  ),
+                  Text('Clicked $_count time(s).'),
+                ],
+              ),
             ),
-            const TextButton(
-              onPressed: null,
-              child: Text('Text button disabled'),
+            const MergeSemantics(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Text('This is a disabled TextButton:'),
+                  TextButton(
+                    onPressed: null,
+                    child: Text('Action Disabled'),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

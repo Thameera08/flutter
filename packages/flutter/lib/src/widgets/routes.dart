@@ -2,6 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'dart:ui';
+/// @docImport 'package:flutter/cupertino.dart';
+/// @docImport 'package:flutter/material.dart';
+///
+/// @docImport 'app.dart';
+/// @docImport 'form.dart';
+/// @docImport 'heroes.dart';
+/// @docImport 'pages.dart';
+/// @docImport 'pop_scope.dart';
+/// @docImport 'will_pop_scope.dart';
+library;
+
 import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -18,6 +30,7 @@ import 'focus_manager.dart';
 import 'focus_scope.dart';
 import 'focus_traversal.dart';
 import 'framework.dart';
+import 'inherited_model.dart';
 import 'modal_barrier.dart';
 import 'navigator.dart';
 import 'overlay.dart';
@@ -167,7 +180,7 @@ abstract class TransitionRoute<T> extends OverlayRoute<T> implements PredictiveB
   //
   // This situation arises when dealing with the Cupertino dismiss gesture.
   @override
-  bool get finishedWhenPopped => _controller!.status == AnimationStatus.dismissed && !_popFinalized;
+  bool get finishedWhenPopped => _controller!.isDismissed && !_popFinalized;
 
   bool _popFinalized = false;
 
@@ -342,11 +355,7 @@ abstract class TransitionRoute<T> extends OverlayRoute<T> implements PredictiveB
       if (current != null) {
         final Animation<double> currentTrain = (current is TrainHoppingAnimation ? current.currentTrain : current)!;
         final Animation<double> nextTrain = nextRoute._animation!;
-        if (
-          currentTrain.value == nextTrain.value ||
-          nextTrain.status == AnimationStatus.completed ||
-          nextTrain.status == AnimationStatus.dismissed
-        ) {
+        if (currentTrain.value == nextTrain.value || !nextTrain.isAnimating) {
           _setSecondaryAnimation(nextTrain, nextRoute.completed);
         } else {
           // Two trains animate at different values. We have to do train hopping.
@@ -361,20 +370,15 @@ abstract class TransitionRoute<T> extends OverlayRoute<T> implements PredictiveB
           //     properly clean up the existing train hopping.
           TrainHoppingAnimation? newAnimation;
           void jumpOnAnimationEnd(AnimationStatus status) {
-            switch (status) {
-              case AnimationStatus.completed:
-              case AnimationStatus.dismissed:
-                // The nextTrain has stopped animating without train hopping.
-                // Directly sets the secondary animation and disposes the
-                // TrainHoppingAnimation.
-                _setSecondaryAnimation(nextTrain, nextRoute.completed);
-                if (_trainHoppingListenerRemover != null) {
-                  _trainHoppingListenerRemover!();
-                  _trainHoppingListenerRemover = null;
-                }
-              case AnimationStatus.forward:
-              case AnimationStatus.reverse:
-                break;
+            if (!status.isAnimating) {
+              // The nextTrain has stopped animating without train hopping.
+              // Directly sets the secondary animation and disposes the
+              // TrainHoppingAnimation.
+              _setSecondaryAnimation(nextTrain, nextRoute.completed);
+              if (_trainHoppingListenerRemover != null) {
+                _trainHoppingListenerRemover!();
+                _trainHoppingListenerRemover = null;
+              }
             }
           }
           _trainHoppingListenerRemover = () {
@@ -407,9 +411,7 @@ abstract class TransitionRoute<T> extends OverlayRoute<T> implements PredictiveB
     }
     // Finally, we dispose any previous train hopping animation because it
     // has been successfully updated at this point.
-    if (previousTrainHoppingListenerRemover != null) {
-      previousTrainHoppingListenerRemover();
-    }
+    previousTrainHoppingListenerRemover?.call();
   }
 
   void _setSecondaryAnimation(Animation<double>? animation, [Future<dynamic>? disposed]) {
@@ -892,7 +894,16 @@ class _DismissModalAction extends DismissAction {
   }
 }
 
-class _ModalScopeStatus extends InheritedWidget {
+enum _ModalRouteAspect {
+  /// Specifies the aspect corresponding to [ModalRoute.isCurrent].
+  isCurrent,
+  /// Specifies the aspect corresponding to [ModalRoute.canPop].
+  canPop,
+  /// Specifies the aspect corresponding to [ModalRoute.settings].
+  settings,
+}
+
+class _ModalScopeStatus extends InheritedModel<_ModalRouteAspect> {
   const _ModalScopeStatus({
     required this.isCurrent,
     required this.canPop,
@@ -920,6 +931,15 @@ class _ModalScopeStatus extends InheritedWidget {
     description.add(FlagProperty('isCurrent', value: isCurrent, ifTrue: 'active', ifFalse: 'inactive'));
     description.add(FlagProperty('canPop', value: canPop, ifTrue: 'can pop'));
     description.add(FlagProperty('impliesAppBarDismissal', value: impliesAppBarDismissal, ifTrue: 'implies app bar dismissal'));
+  }
+
+  @override
+  bool updateShouldNotifyDependent(covariant _ModalScopeStatus oldWidget, Set<_ModalRouteAspect> dependencies) {
+    return dependencies.any((_ModalRouteAspect dependency) => switch (dependency) {
+      _ModalRouteAspect.isCurrent => isCurrent != oldWidget.isCurrent,
+      _ModalRouteAspect.canPop    => canPop != oldWidget.canPop,
+      _ModalRouteAspect.settings  => route.settings != oldWidget.route.settings,
+    });
   }
 }
 
@@ -1155,9 +1175,39 @@ abstract class ModalRoute<T> extends TransitionRoute<T> with LocalHistoryRoute<T
   /// while it is visible (specifically, if [isCurrent] or [canPop] change value).
   @optionalTypeArgs
   static ModalRoute<T>? of<T extends Object?>(BuildContext context) {
-    final _ModalScopeStatus? widget = context.dependOnInheritedWidgetOfExactType<_ModalScopeStatus>();
-    return widget?.route as ModalRoute<T>?;
+    return _of<T>(context);
   }
+
+  static ModalRoute<T>? _of<T extends Object?>(BuildContext context, [_ModalRouteAspect? aspect]) {
+    return InheritedModel.inheritFrom<_ModalScopeStatus>(context, aspect: aspect)?.route as ModalRoute<T>?;
+  }
+
+  /// Returns [ModalRoute.isCurrent] for the modal route most closely associated
+  /// with the given context.
+  ///
+  /// Returns null if the given context is not associated with a modal route.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [ModalRoute.isCurrent] property of the ancestor [_ModalScopeStatus] changes.
+  static bool? isCurrentOf(BuildContext context) => _of(context, _ModalRouteAspect.isCurrent)?.isCurrent;
+
+  /// Returns [ModalRoute.canPop] for the modal route most closely associated
+  /// with the given context.
+  ///
+  /// Returns null if the given context is not associated with a modal route.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [ModalRoute.canPop] property of the ancestor [_ModalScopeStatus] changes.
+  static bool? canPopOf(BuildContext context) => _of(context, _ModalRouteAspect.canPop)?.canPop;
+
+  /// Returns [ModalRoute.settings] for the modal route most closely associated
+  /// with the given context.
+  ///
+  /// Returns null if the given context is not associated with a modal route.
+  ///
+  /// Use of this method will cause the given [context] to rebuild any time that
+  /// the [ModalRoute.settings] property of the ancestor [_ModalScopeStatus] changes.
+  static RouteSettings? settingsOf(BuildContext context) => _of(context, _ModalRouteAspect.settings)?.settings;
 
   /// Schedule a call to [buildTransitions].
   ///
@@ -1605,18 +1655,17 @@ abstract class ModalRoute<T> extends TransitionRoute<T> with LocalHistoryRoute<T
     }
     // If attempts to dismiss this route might be vetoed such as in a page
     // with forms, then do not allow the user to dismiss the route with a swipe.
-    if (hasScopedWillPopCallback ||
-        popDisposition == RoutePopDisposition.doNotPop) {
+    if (hasScopedWillPopCallback || popDisposition == RoutePopDisposition.doNotPop) {
       return false;
     }
     // If we're in an animation already, we cannot be manually swiped.
-    if (animation!.status != AnimationStatus.completed) {
+    if (!animation!.isCompleted) {
       return false;
     }
     // If we're being popped into, we also cannot be swiped until the pop above
     // it completes. This translates to our secondary animation being
     // dismissed.
-    if (secondaryAnimation!.status != AnimationStatus.dismissed) {
+    if (!secondaryAnimation!.isDismissed) {
       return false;
     }
     // If we're in a gesture already, we cannot start another.
@@ -1768,6 +1817,9 @@ abstract class ModalRoute<T> extends TransitionRoute<T> with LocalHistoryRoute<T
   void addScopedWillPopCallback(WillPopCallback callback) {
     assert(_scopeKey.currentState != null, 'Tried to add a willPop callback to a route that is not currently in the tree.');
     _willPopCallbacks.add(callback);
+    if (_willPopCallbacks.length == 1) {
+      _maybeDispatchNavigationNotification();
+    }
   }
 
   /// Remove one of the callbacks run by [willPop].
@@ -1784,6 +1836,9 @@ abstract class ModalRoute<T> extends TransitionRoute<T> with LocalHistoryRoute<T
   void removeScopedWillPopCallback(WillPopCallback callback) {
     assert(_scopeKey.currentState != null, 'Tried to remove a willPop callback from a route that is not currently in the tree.');
     _willPopCallbacks.remove(callback);
+    if (_willPopCallbacks.isEmpty) {
+      _maybeDispatchNavigationNotification();
+    }
   }
 
   /// Registers the existence of a [PopEntry] in the route.
@@ -1821,7 +1876,8 @@ abstract class ModalRoute<T> extends TransitionRoute<T> with LocalHistoryRoute<T
       // canPop indicates that the originator of the Notification can handle a
       // pop. In the case of PopScope, it handles pops when canPop is
       // false. Hence the seemingly backward logic here.
-      canHandlePop: popDisposition == RoutePopDisposition.doNotPop,
+      canHandlePop: popDisposition == RoutePopDisposition.doNotPop
+          || _willPopCallbacks.isNotEmpty,
     );
     // Avoid dispatching a notification in the middle of a build.
     switch (SchedulerBinding.instance.schedulerPhase) {
@@ -1940,9 +1996,8 @@ abstract class ModalRoute<T> extends TransitionRoute<T> with LocalHistoryRoute<T
       );
     }
     barrier = IgnorePointer(
-      ignoring: animation!.status == AnimationStatus.reverse || // changedInternalState is called when animation.status updates
-                animation!.status == AnimationStatus.dismissed, // dismissed is possible when doing a manual pop gesture
-      child: barrier,
+      ignoring: !animation!.isForwardOrCompleted, // changedInternalState is called when animation.status updates
+      child: barrier,                             // dismissed is possible when doing a manual pop gesture
     );
     if (semanticsDismissible && barrierDismissible) {
       // To be sorted after the _modalScope.
